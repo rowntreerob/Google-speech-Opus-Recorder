@@ -32,6 +32,8 @@ extra callback from the fragment to MAIN in order to stop the added service(opus
 ###install 
 clone this module and then do as instructed in the orig. project below...
 paying close attention to the part on "Enable the Google speech api for your project".
+Verify you have your own 'credential.json' file obtain from the google cloud api console and that you locate this file at
+app/src/main/res/raw/credential.json
 
 In that section you must download from Google api console the file=credential.json and copy that download to ./app/res/raw
 
