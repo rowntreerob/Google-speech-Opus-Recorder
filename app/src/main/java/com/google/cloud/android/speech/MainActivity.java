@@ -39,6 +39,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
+import java.io.IOException;
 import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity implements ApiFragment.Listener,
@@ -120,19 +121,33 @@ public class MainActivity extends AppCompatActivity implements ApiFragment.Liste
      *android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS"
      */
 
+    //bug
+    //Request requires android.permission.RECORD_AUDIO
     @Override
     protected void onStart() {
         super.onStart();
-        Log.d("MAIN", "onStart");
+
+        Log.d("MAIN", "onStart ");
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
+                != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this,
+                        Manifest.permission.READ_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this,
+                        Manifest.permission.MOUNT_UNMOUNT_FILESYSTEMS)
+                        != PackageManager.PERMISSION_GRANTED
+                ) {
             if (ActivityCompat.shouldShowRequestPermissionRationale(this,
                     Manifest.permission.RECORD_AUDIO)) {
-                Log.d("Main", "CHK on RECORD PERMIT NEED A GRANT W EXPLAIN");
+                Log.d("Main", "CHK 1 on RECORD PERMIT NEED A GRANT W EXPLAIN");
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.RECORD_AUDIO,
                                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                                Manifest.permission.READ_EXTERNAL_STORAGE,
                                 Manifest.permission.MOUNT_UNMOUNT_FILESYSTEMS
                         },
                         MainActivity.REQUEST_RECORD_AUDIO_PERMISSION);
@@ -141,20 +156,18 @@ public class MainActivity extends AppCompatActivity implements ApiFragment.Liste
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.RECORD_AUDIO,
                                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                                Manifest.permission.READ_EXTERNAL_STORAGE,
                                 Manifest.permission.MOUNT_UNMOUNT_FILESYSTEMS},
                         MainActivity.REQUEST_RECORD_AUDIO_PERMISSION);
             }
-        }else{
-            if (ContextCompat.checkSelfPermission(this,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(this,
-                            Manifest.permission.MOUNT_UNMOUNT_FILESYSTEMS)
-                            == PackageManager.PERMISSION_GRANTED){
-                startVoiceRecorder();
-            }
+        } else {
+            startVoiceRecorder();
         }
 
+
+        //Log.d("Main", "NO Permissions FALL thru");
+
+        //startVoiceRecorder();
     }
 
     @Override
@@ -162,7 +175,7 @@ public class MainActivity extends AppCompatActivity implements ApiFragment.Liste
                                            @NonNull int[] grantResults) {
         Log.d("MAIN", "onReqPermitsRSLT");
         if (requestCode == REQUEST_RECORD_AUDIO_PERMISSION) {
-            if (permissions.length == 3 && grantResults.length == 3
+            if (permissions.length == 4 && grantResults.length == 4
                     && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 startVoiceRecorder();
             } else {
@@ -196,7 +209,9 @@ public class MainActivity extends AppCompatActivity implements ApiFragment.Liste
         if (mVoiceRecorder != null) {
             mVoiceRecorder.stop();
         }
-        mVoiceRecorder = new OpusRecorder(mVoiceCallback);
+
+        //mVoiceRecorder = new OpusRecorder(mVoiceCallback);
+        mVoiceRecorder = OpusRecorder.getInstance(mVoiceCallback);
         mVoiceRecorder.start();
     }
 
@@ -218,7 +233,7 @@ public class MainActivity extends AppCompatActivity implements ApiFragment.Liste
 
     @Override
     public void onSpeechRecognized(final String text, final boolean isFinal) {
-        if (isFinal) {
+        if (isFinal && null != mVoiceRecorder) {
             mVoiceRecorder.dismiss();
         }
         if (mText != null && !TextUtils.isEmpty(text)) {

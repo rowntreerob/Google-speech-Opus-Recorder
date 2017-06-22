@@ -4,7 +4,9 @@ import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.support.annotation.NonNull;
+import android.util.Log;
 
+import java.io.File;
 import java.nio.ByteBuffer;
 
 import top.oply.opuslib.OpusTool;
@@ -23,14 +25,21 @@ import top.oply.opuslib.OpusTrackInfo;
  */
 public class OpusRecorder {
 
-    private static final int[] SAMPLE_RATE_CANDIDATES = new int[]{16000, 11025, 22050, 44100};
-
+ //   private static final int[] SAMPLE_RATE_CANDIDATES = new int[]{16000, 11025, 22050, 44100};
+ private static final int[] SAMPLE_RATE_CANDIDATES = new int[]{16000};
     private static final int CHANNEL = AudioFormat.CHANNEL_IN_MONO;
     private static final int ENCODING = AudioFormat.ENCODING_PCM_16BIT;
 
-    private static final int AMPLITUDE_THRESHOLD = 1500;
-    private static final int SPEECH_TIMEOUT_MILLIS = 2000;
-    private static final int MAX_SPEECH_LENGTH_MILLIS = 30 * 1000;
+    //private static final int AMPLITUDE_THRESHOLD = 1500;
+    private static final int AMPLITUDE_THRESHOLD = 3000;
+    private static final int SPEECH_TIMEOUT_MILLIS = 1400;
+    private static final int MAX_SPEECH_LENGTH_MILLIS = 12 * 1000;
+    //private static final int MAX_SPEECH_LENGTH_MILLIS = 30 * 1000;
+    private static final String TAG = "OpusRecorder";
+
+    private static final int STATE_NONE = 0;
+    private static final int STATE_STARTED = 1;
+    private volatile int state = STATE_NONE;
 
     public static abstract class Callback {
 
@@ -63,8 +72,10 @@ public class OpusRecorder {
     private Thread mThread;
 
     private byte[] mBuffer;
+    private int bufferSize = 0;
 
     private final Object mLock = new Object();
+    private String filePath;
 
     /** The timestamp of the last time that voice is heard. */
     private long mLastVoiceHeardMillis = Long.MAX_VALUE;
@@ -78,6 +89,17 @@ public class OpusRecorder {
     public OpusRecorder(@NonNull Callback callback) {
         mCallback = callback;
     }
+    //bug try singleton :: opus_android vrn of recorder
+    private static volatile OpusRecorder oRecorder ;
+    public static OpusRecorder getInstance(Callback callback){
+        if(oRecorder == null)
+            synchronized(OpusRecorder.class){
+                if(oRecorder == null)
+                    oRecorder = new OpusRecorder(callback);
+            }
+        return oRecorder;
+    }
+
 
     /**
      * Init the lib's OpusTool with a new file. writes the header in the encoded(opus) file
@@ -87,8 +109,11 @@ public class OpusRecorder {
      * https://github.com/louisyonge/opus_android/blob/master/opuslib/src/main/jni/opustool/opusaudio.c#L289
      */
     public void init() {
+
         mOpusTool = new OpusTool();
-        int rst = mOpusTool.startRecording(getNextFile());
+        filePath = getNextFile();
+        //Log.d(TAG, "initOn , startRec " +filePath);
+        int rst = mOpusTool.startRecording(filePath);
     }
 
     private String getNextFile(){
@@ -97,21 +122,30 @@ public class OpusRecorder {
 
     /**
      * Starts recording audio.
-     *
+     *1. audioRecrd START
+     *2. trackInfo GetFilNM
+     *3. opusTool.startRecording(file
+     *4. Thread new/start
+     *5. ReadWrite LOOP on buffer inside Thread
      * <p>The caller is responsible for calling {@link #stop()} later.</p>
      */
     public void start() {
         // Stop recording if it is currently ongoing.
         stop();
         // Try to create a new recording session.
-        mAudioRecord = createAudioRecord();
+        mAudioRecord = createAudioRecord(); //dont hava file yet
+        //Log.d(TAG, "start java.audio.record");
+        mAudioRecord.startRecording();
         if (mAudioRecord == null) {
             throw new RuntimeException("Cannot instantiate VoiceRecorder");
         }
-        init();
+        init(); //getNxt file now calls opusTool.startrecording(filNM
 
         // Start recording.
-        mAudioRecord.startRecording();
+
+
+        //mAudioRecord.startRecording();
+        state = STATE_STARTED;
         // Start processing the captured audio.
         mThread = new Thread(new ProcessVoice());
         mThread.start();
@@ -121,20 +155,36 @@ public class OpusRecorder {
      * Stops recording audio and the encoderTool for Opus.
      */
     public void stop() {
+        //Log.d(TAG, "stop");
         synchronized (mLock) {
+            state = STATE_NONE;
+
+            if(null != mOpusTool)mOpusTool.stopRecording();
             dismiss();
+
+            //.updateTrackInfo()
+            OpusTrackInfo info =  OpusTrackInfo.getInstance();
+            if(null != filePath) {
+                info.addOpusFile(filePath);
+                File f = new File(filePath);}
+
+            // updateTrackInfo end
+
             if (mThread != null) {
                 mThread.interrupt();
                 mThread = null;
             }
+//bug interupted
+
             if (mAudioRecord != null) {
                 mAudioRecord.stop();
                 mAudioRecord.release();
                 mAudioRecord = null;
             }
             mBuffer = null;
-            if(null != mOpusTool)mOpusTool.stopRecording();
+
         }
+//was here updateTrack
     }
 
     /**
@@ -167,14 +217,17 @@ public class OpusRecorder {
      */
     private AudioRecord createAudioRecord() {
         for (int sampleRate : SAMPLE_RATE_CANDIDATES) {
+
             final int sizeInBytes = AudioRecord.getMinBufferSize(sampleRate, CHANNEL, ENCODING);
+            bufferSize = (sizeInBytes / 1920 + 1) * 1920;
             if (sizeInBytes == AudioRecord.ERROR_BAD_VALUE) {
                 continue;
             }
             final AudioRecord audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,
-                    sampleRate, CHANNEL, ENCODING, sizeInBytes);
+                    sampleRate, CHANNEL, ENCODING, bufferSize);
             if (audioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
-                mBuffer = new byte[sizeInBytes];
+                //Log.d(TAG, "createRecdr " + sampleRate +" " +bufferSize);
+                mBuffer = new byte[bufferSize];
                 return audioRecord;
             } else {
                 audioRecord.release();
@@ -188,16 +241,20 @@ public class OpusRecorder {
      * make mic's buffer avail for call to jni layer for  OpusTool writeFrame()
      * rev : input type DirectBuffer is now just bytes[]
      */
-    private void writeAudioDataToOpus(byte[] buffer, int size) {
+    private void writeAudioDataToOpus(ByteBuffer buffer, int size) {
 
         //bytes[] to new Buffer
         ByteBuffer finalBuffer = ByteBuffer.allocateDirect(size);
         finalBuffer.put(buffer);
+        //Log.d(TAG, "buffrPut " +buffer.position());
+
         finalBuffer.rewind();
         boolean flush = false;
 
         //write data  to Opus file
-        while (mVoiceStartedMillis < MAX_SPEECH_LENGTH_MILLIS && finalBuffer.hasRemaining()) {
+        //bug mLastVoiceHeardMillis != Long.MAX_VALUE;
+
+        while (state == STATE_STARTED && finalBuffer.hasRemaining()) {
             int oldLimit = -1;
             if (finalBuffer.remaining() > fileBuffer.remaining()) {
                 oldLimit = finalBuffer.limit();
@@ -206,10 +263,11 @@ public class OpusRecorder {
             fileBuffer.put(finalBuffer);
             if (fileBuffer.position() == fileBuffer.limit() || flush) {
                 int length = !flush ? fileBuffer.limit() : finalBuffer.position();
-
-                int rst = mOpusTool.writeFrame(fileBuffer, length);
+                int rst = mOpusTool.writeFrame(fileBuffer, length); //to encoder
                 if (rst != 0) {
                     fileBuffer.rewind();
+                } else{
+                    Log.d(TAG, "writeFrame err rewindNO " + rst);
                 }
             }
             if (oldLimit != -1) {
@@ -232,14 +290,29 @@ public class OpusRecorder {
                     if (Thread.currentThread().isInterrupted()) {
                         break;
                     }
-                    final int size = mAudioRecord.read(mBuffer, 0, mBuffer.length);
-                    writeAudioDataToOpus(mBuffer, size);
+                    //final int size = mAudioRecord.read(mBuffer, 0, mBuffer.length);
+                    final int size = mAudioRecord.read(firstBuffer,  bufferSize); //no chg to buffr state
+                    firstBuffer.position(size);
+                    firstBuffer.flip();  //propr state for relative gets.... in "writeaudioToOpus"
+                    //writeAudioDataToOpus(mBuffer, size);
+                    if (size != AudioRecord.ERROR_INVALID_OPERATION) {
+                      try {
+                          writeAudioDataToOpus(firstBuffer, size);
+                      }
+                      catch (Exception e)
+                      {
+                          e.printStackTrace();
+                      }
+                    } // done buffer get byte[] from the buffer and do the rest
+                    firstBuffer.rewind();
+                    firstBuffer.get(mBuffer); //what is state of firBffr after this? rewindIT?
+
                     final long now = System.currentTimeMillis();
 
                     if (isHearingVoice(mBuffer, size)) {
                         if (mLastVoiceHeardMillis == Long.MAX_VALUE) {
                             mVoiceStartedMillis = now;
-                            mCallback.onVoiceStart();
+                            mCallback.onVoiceStart(); //bug called before Main-> start
                         }
                         mCallback.onVoice(mBuffer, size);
                         mLastVoiceHeardMillis = now;
@@ -257,6 +330,7 @@ public class OpusRecorder {
         }
 
         private void end() {
+            stop();
             mOpusTool.stopRecording();
             mLastVoiceHeardMillis = Long.MAX_VALUE;
             mCallback.onVoiceEnd();

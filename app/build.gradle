@@ -18,12 +18,12 @@ apply plugin: 'com.android.application'
 apply plugin: 'com.google.protobuf'
 
 android {
-    compileSdkVersion 24
-    buildToolsVersion '24.0.2'
+    compileSdkVersion 25
+    buildToolsVersion '25.0.2'
 
     defaultConfig {
         applicationId "com.google.cloud.android.speech"
-        targetSdkVersion 24
+        targetSdkVersion 25
         versionCode 1
         versionName '1.0'
     }
@@ -87,14 +87,17 @@ protobuf {
 }
 
 ext {
-    supportLibraryVersion = '24.2.1'
+    supportLibraryVersion = '25.3.1'
     grpcVersion = '0.15.0'
 }
 
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
+    // line below if u do not need to see details of the project in your editor ie the JNI stuff
+     compile 'top.oply.opuslib:opuslib:1.0.2'
+    // use "compile" below if you want to see the JNI details from louisyouge.opuslib module and the JNI
     // Opus fileSink from libtool : https://github.com/louisyonge/opus_android/tree/master/opuslib
-    compile 'top.oply.opuslib:opuslib:1.0.2'
+    // compile project(':opuslib')
 
     // Support libraries
     compile "com.android.support:design:$supportLibraryVersion"
